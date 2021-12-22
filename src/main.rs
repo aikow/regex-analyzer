@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use std::path::Path;
@@ -17,8 +17,7 @@ use serde::{Serialize, Deserialize};
 #[clap(about = "Analyze regex patterns inside a file.")]
 struct Cli {
     /// Path to the input file.
-    #[clap(short, long)]
-    file: String,
+    files: Vec<String>,
 
     /// Path to the patterns file.
     #[clap(short = 'c', long)]
@@ -31,6 +30,7 @@ struct Cli {
 
 
 /// Represents a single pattern to search.
+#[derive(Clone)]
 struct Pattern {
     name: String,
     pattern: Regex,
@@ -127,7 +127,24 @@ fn main() {
 
     // Read patterns from the given file.
     let patterns = Pattern::parse_from_file(&cli.patterns_file).unwrap();
-    let mut patterns = analyze_file(cli.file, patterns).unwrap() ;
 
-    print_results(&mut patterns);
+    let patterns: Vec<_> = if let Some(filter) = cli.patterns {
+        let filter: HashSet<&str> = filter.split(',').collect();
+        patterns
+            .into_iter()
+            .filter(|Pattern { name, .. }| filter.contains(&name[..]))
+            .collect()
+    } else {
+        patterns
+    };
+
+    for file in cli.files {
+        let file = Path::new(&file);
+        let mut patterns = analyze_file(file, patterns.to_vec()).unwrap() ;
+
+        // println!("{:=^length$}", format!(" {} ", file.file_name().unwrap().to_str().unwrap()), length=20);
+        println!("==== {} ====", file.file_name().unwrap().to_str().unwrap());
+        print_results(&mut patterns);
+        println!();
+    }
 }
