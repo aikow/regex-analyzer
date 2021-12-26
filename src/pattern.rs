@@ -3,9 +3,7 @@ use std::{collections::HashMap, io::Write};
 use num_format::{Locale, ToFormattedString};
 use regex::Regex;
 
-
 use self::group::GroupVec;
-
 
 /// Actual pattern instance, which holds its name and its regex.
 #[derive(Debug, Clone)]
@@ -14,54 +12,61 @@ pub struct Pattern {
     pub regex: Regex,
 }
 
-
 pub mod group {
     //! Contains method related to the GroupTree data structure.
     //!
-    use std::{rc::{Rc, Weak}, vec::IntoIter};
     use std::ops::{Deref, DerefMut};
 
     /// Represents a generic tree which contains named groups.
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialOrd, PartialEq, Eq, Ord)]
     pub enum GroupTree<T> {
         Leaf(T),
-        Group { name: String, group: Vec<GroupTree<T>> },
+        Group {
+            name: String,
+            group: Vec<GroupTree<T>>,
+        },
     }
-
 
     #[derive(Debug, Clone)]
     pub struct GroupVec<V> {
         /// Holds references to the flattened vec, as well as to the original tree, so that we can
         /// recreate the groups later.
-        inner: Vec<GroupTree<Weak<V>>>,
+        pub inner: Vec<GroupTree<usize>>,
 
         /// A flattened list of references to the tree.
-        flattened: Vec<Rc<V>>,
+        pub flattened: Vec<V>,
     }
 
-
     impl<V> GroupVec<V> {
-        pub fn from_tree<T>(tree_vec: Vec<GroupTree<T>>) -> GroupVec<V> where V: super::From<T> {
+        pub fn from_tree<T>(tree_vec: Vec<GroupTree<T>>) -> GroupVec<V>
+        where
+            V: From<T>,
+        {
             /// Helper function that traverses the GroupTree and consumes it, creating the
             /// GroupVec.
-            fn traverse<T, V>(
-                tree: GroupTree<T>,
-                vec: &mut Vec<Rc<V>>,
-            ) -> GroupTree<Weak<V>> where V: super::From<T> {
+            fn traverse<T, V>(tree: GroupTree<T>, vec: &mut Vec<V>) -> GroupTree<usize>
+            where
+                V: From<T>,
+            {
                 match tree {
                     GroupTree::Leaf(other) => {
-                        let ptr = Rc::new(V::from(other));
-                        vec.push(ptr.clone());
+                        let value = V::from(other);
+                        vec.push(value);
 
-                        GroupTree::Leaf(Rc::downgrade(&ptr))
+                        GroupTree::Leaf(vec.len() - 1)
                     }
                     GroupTree::Group { name, group } => {
-                        let mut inner_group: Vec<GroupTree<Weak<V>>> = Vec::new();
+                        let mut inner_group: Vec<GroupTree<usize>> = Vec::new();
                         for item in group {
                             inner_group.push(traverse(item, vec));
                         }
 
-                        GroupTree::Group { name, group: inner_group }
+                        inner_group.sort();
+
+                        GroupTree::Group {
+                            name,
+                            group: inner_group,
+                        }
                     }
                 }
             }
@@ -71,44 +76,31 @@ pub mod group {
             for tree in tree_vec {
                 inner.push(traverse(tree, &mut flattened));
             }
+            inner.sort();
 
             GroupVec { inner, flattened }
         }
     }
 
     impl<V> Deref for GroupVec<V> {
-        type Target = [Rc<V>];
+        type Target = [V];
 
         fn deref(&self) -> &Self::Target {
             &self.flattened
         }
     }
 
-    impl <V> DerefMut for GroupVec<V> {
+    impl<V> DerefMut for GroupVec<V> {
         fn deref_mut(&mut self) -> &mut Self::Target {
             &mut self.flattened
         }
     }
 
-    // pub struct GroupVecIterator<'a> {
-    //     vec: &'a vec,
-    // }
-    //
-    // impl<'a, V> IntoIterator for &'a GroupVec<V> {
-    //     type Item = &'a Rc<V>;
-    //     type IntoIter = Iter<&'a Rc<V>>;
-    //
-    //     fn into_iter(self) -> Self::IntoIter {
-    //         self.flattened.iter()
-    //     }
-    // }
+    /// Trait used to convert between two types when creating the GroupVec from the GroupTree structs.
+    pub trait From<T> {
+        fn from(other: T) -> Self;
+    }
 }
-
-
-trait From<T> {
-    fn from(other: T) -> Self;
-}
-
 
 pub trait Analyzer<T> {
     type Analysis;
@@ -117,15 +109,15 @@ pub trait Analyzer<T> {
     fn analyze(&mut self, line: String);
 
     /// Writes the results to the given writer.
-    fn format<W>(&mut self, writer: &mut W) where W: Write;
+    fn format<W>(&mut self, writer: &mut W)
+    where
+        W: Write;
 }
 
-
 pub mod counter {
-    use std::ops::Deref;
-    use super::*;
     use super::group::*;
     use super::Analyzer;
+    use super::*;
 
     #[derive(Debug, Clone)]
     struct Inner {
@@ -133,9 +125,12 @@ pub mod counter {
         count: u64,
     }
 
-    impl super::From<Pattern> for Inner {
+    impl group::From<Pattern> for Inner {
         fn from(other: Pattern) -> Self {
-            Inner { pattern: other, count: 0_u64 }
+            Inner {
+                pattern: other,
+                count: 0_u64,
+            }
         }
     }
 
@@ -146,7 +141,9 @@ pub mod counter {
 
     impl PatternCounter {
         pub fn new(tree: Vec<GroupTree<Pattern>>) -> Self {
-            PatternCounter { patterns: GroupVec::from_tree::<Pattern>(tree) }
+            PatternCounter {
+                patterns: GroupVec::from_tree::<Pattern>(tree),
+            }
         }
     }
 
@@ -154,15 +151,16 @@ pub mod counter {
         type Analysis = u64;
 
         fn analyze(&mut self, line: String) {
-            for inner in &self.patterns[..] {
+            for inner in &mut self.patterns[..] {
                 if inner.pattern.regex.is_match(&line) {
                     inner.count += 1;
                 }
             }
         }
 
-        fn format<W>(&mut self, writer: &mut W)
-            where W: Write
+        fn format<W>(&mut self, _writer: &mut W)
+        where
+            W: Write,
         {
             // Find longest name and count
             let mut longest_name = 0;
@@ -180,26 +178,38 @@ pub mod counter {
                 }
             }
 
-            // patterns.sort_by(|lhs, rhs| rhs.count.cmp(&lhs.count));
+            fn traverse(tree: &GroupTree<usize>, slice: &[Inner], indent: usize) {
+                match tree {
+                    GroupTree::Leaf(index) => {
+                        let Inner { pattern, count } = slice.get(*index).unwrap();
+                        println!(
+                            "{: <indent$}{:} {:}",
+                            "",
+                            format!("{}:", pattern.name),
+                            count.to_formatted_string(&Locale::en),
+                            indent = indent
+                        );
+                    }
+                    GroupTree::Group { name, group } => {
+                        println!("{}:", name);
+                        for inner_tree in group {
+                            traverse(inner_tree, slice, indent + 2);
+                        }
+                    }
+                }
+            }
 
-            for inner in &self.patterns[..] {
-                println!(
-                    "{:<name_len$} {:>count_len$}",
-                    format!("{}:", inner.pattern.name),
-                    inner.count.to_formatted_string(&Locale::en),
-                    name_len = longest_name + 1,
-                    count_len = longest_count
-                );
+            for group_tree in &self.patterns.inner {
+                traverse(group_tree, &self.patterns[..], 0)
             }
         }
     }
 }
 
-
 pub mod matcher {
-    use crate::GroupTree;
-    use super::*;
     use super::Analyzer;
+    use super::*;
+    use crate::GroupTree;
 
     #[derive(Debug, Clone)]
     struct Inner {
@@ -207,7 +217,7 @@ pub mod matcher {
         pub matches: HashMap<String, u64>,
     }
 
-    impl super::From<Pattern> for Inner {
+    impl group::From<Pattern> for Inner {
         fn from(other: Pattern) -> Self {
             Inner {
                 pattern: other,
@@ -224,7 +234,10 @@ pub mod matcher {
 
     impl PatternMatcher {
         pub fn new(tree: Vec<GroupTree<Pattern>>, top: usize) -> Self {
-            PatternMatcher { patterns: GroupVec::from_tree::<Pattern>(tree), top }
+            PatternMatcher {
+                patterns: GroupVec::from_tree::<Pattern>(tree),
+                top,
+            }
         }
     }
 
@@ -232,7 +245,7 @@ pub mod matcher {
         type Analysis = HashMap<String, u64>;
 
         fn analyze(&mut self, line: String) {
-            for inner in &self.patterns[..] {
+            for inner in &mut self.patterns[..] {
                 for mat in inner.pattern.regex.find_iter(&line) {
                     let entry = inner.matches.entry(mat.as_str().to_string()).or_insert(0);
                     *entry += 1;
@@ -240,8 +253,9 @@ pub mod matcher {
             }
         }
 
-        fn format<W>(&mut self, writer: &mut W)
-            where W: std::io::Write
+        fn format<W>(&mut self, _writer: &mut W)
+        where
+            W: std::io::Write,
         {
             // Find longest name and count
             let mut longest_name = 0;
@@ -253,7 +267,7 @@ pub mod matcher {
                     longest_name = name_len;
                 }
 
-                for (mat, count) in inner.matches.iter().take(self.top) {
+                for (_mat, count) in inner.matches.iter().take(self.top) {
                     let count_len = count.to_formatted_string(&Locale::en).chars().count();
                     if longest_count < count_len {
                         longest_count = count_len;
@@ -281,4 +295,3 @@ pub mod matcher {
         }
     }
 }
-

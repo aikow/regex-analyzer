@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, stdout};
+use std::io::stdout;
 use std::path::Path;
 
 use clap::Parser;
+
+use analyzer::Analyzer;
 
 /// Command line arguments configuration.
 #[derive(Parser, Debug)]
@@ -32,7 +32,6 @@ struct Cli {
     top_matches: usize,
 }
 
-
 /// Main entry point.
 fn main() {
     let cli = Cli::parse();
@@ -53,7 +52,8 @@ fn main() {
     for file in cli.files {
         let file = Path::new(&file);
         if cli.matches {
-            let mut matcher = analyzer::match_file(file, patterns.clone(), cli.top_matches).unwrap();
+            let mut matcher =
+                analyzer::match_file(file, patterns.clone(), cli.top_matches).unwrap();
             println!("==== {} ====", file.file_name().unwrap().to_str().unwrap());
             matcher.format(&mut stdout());
             println!();
