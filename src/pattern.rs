@@ -295,3 +295,60 @@ pub mod matcher {
         }
     }
 }
+
+pub mod vocab {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    pub struct Vocabulizer {
+        vocab: HashMap<String, usize>,
+        top: usize,
+    }
+
+    impl Vocabulizer {
+        pub fn new(top: usize) -> Self {
+            Vocabulizer {
+                vocab: HashMap::new(),
+                top,
+            }
+        }
+
+        pub fn analyze(&mut self, line: String) {
+            for word in line.split_whitespace() {
+                let entry = self.vocab.entry(word.to_string()).or_insert(0);
+                *entry += 1;
+            }
+        }
+
+        fn format<W>(&mut self, _writer: &mut W) where W: std::io::Write {
+            // Find longest name and count
+            let mut longest_name = 0;
+            let mut longest_count = 0;
+            for (word, count) in self.vocab.iter() {
+                let name_len = word.chars().count();
+                if longest_name < name_len {
+                    longest_name = name_len;
+                }
+
+                if longest_count < *count {
+                    longest_count *= count;
+                }
+            }
+
+
+            for inner in &self.patterns[..] {
+                println!("{}", inner.pattern.name);
+                // TODO: Sort data before printing.
+                for (mat, count) in inner.matches.iter().take(self.top) {
+                    println!(
+                        "\t{:<match_len$} {} {:>count_len$}",
+                        format!("{}:", mat),
+                        count.to_formatted_string(&Locale::en),
+                        match_len = longest_match + 1,
+                        count_len = longest_count
+                    );
+                }
+            }
+        }
+    }
+}

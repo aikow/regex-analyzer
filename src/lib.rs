@@ -11,6 +11,7 @@ pub mod pattern;
 pub use crate::pattern::counter::PatternCounter;
 pub use crate::pattern::group::GroupTree;
 pub use crate::pattern::matcher::PatternMatcher;
+pub use crate::pattern::vocab::Vocabulizer;
 pub use crate::pattern::{Analyzer, Pattern};
 
 pub fn count_file<P>(path: P, tree: Vec<GroupTree<Pattern>>) -> Result<PatternCounter, String>
@@ -49,6 +50,20 @@ where
     }
 
     Ok(matches)
+}
+
+pub fn count_vocab<P>(path: P) -> Result<Vocabulizer, String> where P: AsRef<Path>, {
+    let mut vocab = Vocabulizer::new();
+
+    let file = File::open(path).map_err(|e| format!("{}", e))?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line.unwrap();
+        vocab.analyze(line);
+    }
+
+    Ok(vocab)
 }
 
 pub fn parse_input<P>(path: P) -> Result<Vec<GroupTree<Pattern>>, String>
